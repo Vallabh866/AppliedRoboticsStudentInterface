@@ -22,3 +22,20 @@ add_library(student SHARED
 target_link_libraries(student
   ${OpenCV_LIBRARIES}  
 )
+
+add_library(match_template SHARED
+   src/match_template.cpp
+)
+
+target_link_libraries(match_template
+  ${OpenCV_LIBRARIES}  
+)
+
+add_library(ocr SHARED
+   src/ocr.cpp
+)
+
+target_link_libraries(ocr
+  tesseract
+  ${OpenCV_LIBRARIES}  
+)
