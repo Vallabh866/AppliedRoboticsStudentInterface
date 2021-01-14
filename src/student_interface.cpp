@@ -15,6 +15,8 @@
 #include <experimental/filesystem>
 #include <sstream>
 
+#include "/home/ubuntu/workspace/project/src/clipper/clipper.hpp"
+#include "clipper/clipper.hpp"
 #include "dubins.h"
 namespace student {
 
@@ -251,10 +253,48 @@ bool processObstacles(const cv::Mat& hsv_img, const double scale, std::vector<Po
       drawContours(contours_img, contours_approx, -1, cv::Scalar(0,170,220), 3, cv::LINE_AA);
       std::cout << "   Approximated contour size: " << approx_curve.size() << std::endl;
     }
-    std::cout << std::endl;
+    //std::cout << std::endl;
     //cv::imshow("Original", contours_img);
     //cv::waitKey(0);
 
+    //-------------------inflated obstacles-------------
+    
+    std::vector<Polygon> inflated_obs;
+
+    const double inflate_int=1000;
+    for(int obs=0; obs<obstacle_list.size(); ++obs){
+
+      ClipperLib::Path srcPoly;
+      ClipperLib::Paths newPoly;
+      ClipperLib::ClipperOffset co;
+
+
+      // iterating through obs and adding inflate
+      for(int vertex=0; vertex<obstacle_list[obs].size(); ++vertex){
+        int x=obstacle_list[obs][vertex].x*inflate_int;
+        int y=obstacle_list[obs][vertex].y*inflate_int;
+        srcPoly<< ClipperLib::IntPoint(x,y);
+
+      }
+
+      co.AddPath(srcPoly, ClipperLib::jtSquare, ClipperLib::etClosedPolygon);
+      co.Execute(newPoly,50);
+
+      for(const ClipperLib::Path &path: newPoly){
+
+        Polygon curr_obs;
+        for (const ClipperLib::IntPoint &pt: path){
+          double x=pt.X/inflate_int;
+          double y=pt.Y/inflate_int;
+          curr_obs.emplace_back(x,y);
+      }
+
+      inflated_obs.push_back(curr_obs);
+      obstacle_list[obs]=curr_obs;
+
+    }
+  }
+  std::cout << "obstacle offset success"  << std::endl;
     return true;
   }
 
