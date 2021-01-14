@@ -14,13 +14,30 @@ include_directories(
  ${project_interface_INCLUDE_DIRS}
 )
 
+##---------------
+add_executable(calibrate
+  src/camera_calibration.cpp
+  )
+##--------------
+
 ## CREATE EXECUTABLE LIBRARY
 add_library(student SHARED
    src/student_interface.cpp
 )
 
+##-----------
+add_library(dubins SHARED
+   src/dubins.cpp
+)
+add_library(polyclipping SHARED
+   src/clipper/clipper.cpp
+)
+##----------
+
 target_link_libraries(student
-  ${OpenCV_LIBRARIES}  
+  ${OpenCV_LIBRARIES} 
+  dubins
+  polyclipping	
 )
 
 add_library(match_template SHARED
@@ -39,3 +56,7 @@ target_link_libraries(ocr
   tesseract
   ${OpenCV_LIBRARIES}  
 )
+#----
+target_link_libraries(calibrate
+  ${OpenCV_LIBRARIES} 
+  )
