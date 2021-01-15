@@ -1,0 +1,7 @@
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/install.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/list_install_components.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/rebuild_cache.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/polyclipping.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/install/strip.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/install/local.dir
+/home/hendrik/workspace/project/src/clipper/build/CMakeFiles/edit_cache.dir
