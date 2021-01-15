@@ -27,14 +27,30 @@ namespace student {
   static int n;
   static double show_scale = 1.0;
 
-  const int max_nodes=100;
-  const int max_loops=2000;
-  const int min_nodes=20;
+  
+  //---------------------
+  const int max_nodes = 100;  //TODO: change
+const int max_loops = 2000;
+const int least_nodes = 20;
+
+// RRT* switch
+const bool RRT_STAR = true;
+
+// Choose mission & params
+//const bool mission_2 = false;
+const bool mission_1=true;
+const int bonus = 2;  // Bonus time for picking up victim (seconds)
+const double speed = 0.2; // Should be ~ 0.2 m/s (0.5m/2.5s)  
+
   //-----------------------------------------
-  void rrt_star(const float theta, Path& path, std::vector<Point>& major_points_path, const Polygon& borders, int kmax, int npts, const std::vector<Polygon>& obstacle_list, std::vector<double> obs_radius, std::vector<Point> obs_center, double& path_length, const std::vector<double> gate_orientn);
-  int inside_polygon(Polygon obs, Point pt);
-  double calculate_angle(Point a, Point b);
-  bool sort_pair(const std::pair<int,Polygon>& a, const std::pair<int,Polygon>& b);
+  void RRT(const float theta, Path& path, std::vector<Point>& major_points_path, const Polygon& borders, int kmax, int npts, const std::vector<Polygon>& obstacle_list, std::vector<double> obs_radius, std::vector<Point> obs_center, double& path_length, const std::vector<double> gate_orientn);
+
+//std::vector<int> Dijkstra(std::vector<std::vector<double>> costmap, const std::vector<std::pair<int,Polygon>>& victim_list);
+  int inside_polygon(Polygon obstacle, Point pt);
+
+bool sort_pair(const std::pair<int,Polygon>& a, const std::pair<int,Polygon>& b);
+
+double calculate_angle(Point a, Point b);
   //------------------------------------------
 
   void mouseCallback(int event, int x, int y, int, void* p)
@@ -219,97 +235,79 @@ namespace student {
 
 bool processObstacles(const cv::Mat& hsv_img, const double scale, std::vector<Polygon>& obstacle_list){
     
-    // Find red regions: h values around 0 (positive and negative angle: [0,15] U [160,179])
-    //cv::imshow("HSV", hsv_img);
-    //cv::waitKey(0);
-
-    cv::Mat red_mask_low, red_mask_high, red_mask;     
-    cv::inRange(hsv_img, cv::Scalar(0, 102, 86), cv::Scalar(40, 255, 255), red_mask_low);
-    cv::inRange(hsv_img, cv::Scalar(164, 102, 86), cv::Scalar(180, 255, 255), red_mask_high);
-    cv::addWeighted(red_mask_low, 1.0, red_mask_high, 1.0, 0.0, red_mask); 
-
-    // cv::Mat img_small;
-    // cv::resize(red_mask, img_small, cv::Size(640, 512));
-
-    
+    cv::Mat red_mask_low, red_mask_high, red_mask;
+    cv::inRange(hsv_img, cv::Scalar(0, 72, 105), cv::Scalar(20, 255, 255), red_mask_low);
+    //cv::inRange(hsv_img, cv::Scalar(175, 10, 10), cv::Scalar(179, 255, 255), red_mask_high);
+    cv::inRange(hsv_img, cv::Scalar(130, 81, 49), cv::Scalar(180, 255, 150), red_mask_high);
+    cv::addWeighted(red_mask_low, 1.0, red_mask_high, 1.0, 0.0, red_mask);
+   
+    // Find red regions
     std::vector<std::vector<cv::Point>> contours, contours_approx;
     std::vector<cv::Point> approx_curve;
-    cv::Mat contours_img;
-
     // Process red mask
-    //contours_img = hsv_img.clone();
     cv::findContours(red_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    // cv::imshow("filterrrr red", red_mask);
-    // cv::waitKey(0);
-    //drawContours(contours_img, contours, -1, cv::Scalar(40,190,40), 1, cv::LINE_AA);
-    //cv::imshow("contours", contours_img);
-    //std::cout << "N. contours: " << contours.size() << std::endl;
-    //std::cout << "contours image " << contours_img << std::endl;
-
+ 
     for (int i=0; i<contours.size(); ++i)
     {
-      //std::cout << (i+1) << ") Contour size: " << contours[i].size() << std::endl;
+      // Approximate polygon w/ fewer vertices if not precise
+      // 3rd arg - max distance original curve to approx
       approxPolyDP(contours[i], approx_curve, 3, true);
-
+ 
       Polygon scaled_contour;
       for (const auto& pt: approx_curve) {
         scaled_contour.emplace_back(pt.x/scale, pt.y/scale);
       }
+      // Add obstacle to list
       obstacle_list.push_back(scaled_contour);
-      contours_approx = {approx_curve};
-      drawContours(contours_img, contours_approx, -1, cv::Scalar(0,170,220), 3, cv::LINE_AA);
-      //std::cout << "   Approximated contour size: " << approx_curve.size() << std::endl;
     }
-    //std::cout << std::endl;
-    //cv::imshow("Original", contours_img);
-    //cv::waitKey(0);
+ 
+    std::vector<Polygon> inflated_obstacles;
+ 
+    const double INT_ROUND = 2000.;
+ 
+    for (int obs = 0; obs < obstacle_list.size(); ++obs) {
+ 
+        ClipperLib::Path srcPoly;
+        ClipperLib::Paths newPoly;
+        ClipperLib::ClipperOffset co;
+ 
+    // Iterate through obstacles
+        for (int ver = 0; ver < obstacle_list[obs].size(); ++ver){
+            int x = obstacle_list[obs][ver].x * INT_ROUND;
+            int y = obstacle_list[obs][ver].y * INT_ROUND;
+            // Add list of points to path
+            srcPoly << ClipperLib::IntPoint(x,y);
+        }
+ 
+    // Provides methods to offset given path
+        co.AddPath(srcPoly, ClipperLib::jtSquare, ClipperLib::etClosedPolygon);
 
-    //-------------------inflated obstacles-------------
-    
-    std::vector<Polygon> inflated_obs;
-
-    const double inflate_int=500;
-    for(int obs=0; obs<obstacle_list.size(); ++obs){
-
-      ClipperLib::Path srcPoly;
-      ClipperLib::Paths newPoly;
-      ClipperLib::ClipperOffset co;
-
-
-      // iterating through obs and adding inflate
-      for(int vertex=0; vertex<obstacle_list[obs].size(); ++vertex){
-        int x=obstacle_list[obs][vertex].x*inflate_int;
-        int y=obstacle_list[obs][vertex].y*inflate_int;
-        srcPoly<< ClipperLib::IntPoint(x,y);
-
-      }
-
-      co.AddPath(srcPoly, ClipperLib::jtSquare, ClipperLib::etClosedPolygon);
-      co.Execute(newPoly,50);
-
-      for(const ClipperLib::Path &path: newPoly){
-
-        Polygon curr_obs;
-        for (const ClipperLib::IntPoint &pt: path){
-          double x=pt.X/inflate_int;
-          double y=pt.Y/inflate_int;
-          curr_obs.emplace_back(x,y);
-      }
-
-      inflated_obs.push_back(curr_obs);
-      obstacle_list[obs]=curr_obs;
-
+        co.Execute(newPoly, 50);    
+        for (const ClipperLib::Path &path: newPoly){
+            // Obstacle obst =  data structure for current obstacle
+            Polygon obst;
+            for (const ClipperLib::IntPoint &pt: path){
+                double x = pt.X / INT_ROUND;
+                double y = pt.Y / INT_ROUND;
+                // Add vertex (x,y) to current obstacle
+                obst.emplace_back(x,y);
+            }
+            // Close and export current obstacle
+            inflated_obstacles.push_back(obst);
+            obstacle_list[obs] = obst;
+        }
+   
     }
-  }
-  std::cout << "obstacle offset success"  << std::endl;
+ 
     return true;
+ 
   }
 
   bool processGate(const cv::Mat& hsv_img, const double scale, Polygon& gate){
     
     // Find purple regions
-    cv::Mat purple_mask;
-    cv::inRange(hsv_img, cv::Scalar(45, 50, 26), cv::Scalar(100, 255, 255), purple_mask);    
+    cv::Mat green_mask;
+    cv::inRange(hsv_img, cv::Scalar(45, 50, 26), cv::Scalar(100, 255, 255), green_mask);    
     //cv::inRange(hsv_img, cv::Scalar(130, 10, 10), cv::Scalar(165, 255, 255), purple_mask);
     
     
@@ -319,7 +317,7 @@ bool processObstacles(const cv::Mat& hsv_img, const double scale, std::vector<Po
 
     // Process purple mask
     contours_img = hsv_img.clone();
-    cv::findContours(purple_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    cv::findContours(green_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     //cv::imshow("filterrrr purple", purple_mask);
     //cv::waitKey(0);
     //drawContours(contours_img, contours, -1, cv::Scalar(40,190,40), 4, cv::LINE_AA);
@@ -371,7 +369,10 @@ bool processObstacles(const cv::Mat& hsv_img, const double scale, std::vector<Po
     return out_ROI;
   }
 
-std::string template_folder = "/home/ubuntu/workspace/template/";
+///std::string template_folder = "/home/ubuntu/workspace/template/";
+
+  std::string template_folder = "/home/ubuntu/workspace/project/src/template";
+  
 bool processVictims(const cv::Mat& hsv_img, const double scale, std::vector<std::pair<int,Polygon>>& victim_list){
 
   // Find green regions
@@ -657,7 +658,7 @@ void unwarp(const cv::Mat& img_in, cv::Mat& img_out, const cv::Mat& transf,
     return (a.first < b.first);
 }
 
-  struct path_pose{
+  struct path_pos{
         double x;
         double y;
         double theta;
@@ -668,7 +669,7 @@ void unwarp(const cv::Mat& img_in, cv::Mat& img_out, const cv::Mat& transf,
 
 
   bool planPath(const Polygon& borders, const std::vector<Polygon>& obstacle_list, const std::vector<std::pair<int,Polygon>>& victim_list, const Polygon& gate, const float x, const float y, const float theta, Path& path, const std::string& config_folder){
-    
+    //Test dubins
     // double x1=0.2;
     // double x2=0.9;
     // float x3= 1.4;
@@ -706,527 +707,463 @@ void unwarp(const cv::Mat& img_in, cv::Mat& img_out, const cv::Mat& transf,
 
     //throw std::logic_error( "STUDENT FUNCTION - PLAN PATH - NOT IMPLEMENTED" );
 
-    std::cout<< "\n\n---------in path Planning----------\n\n\n";
-    int kmax=10;
-    int npts=50;
-
-    //----------Finding Centers of all the objects (knowing the Arena)---------
-    //----------Obstacles---------------------------
-    
-    std::vector<Point> obs_center; //obstacle center
-    std::vector<double> obs_radius; //obstacle radius
-
-    double obs_x;
-    double obs_y;
-
-    // finding center
-    for(int i=0; i<obstacle_list.size(); i++){
-      obs_x=0;
-      obs_y=0;
-
-      Polygon curr_poly= obstacle_list[i];
-      for(int pt=0; pt< curr_poly.size(); pt++){
-        obs_x+= curr_poly[pt].x;
-        obs_y+= curr_poly[pt].y;
-      }
-
-      obs_x/= curr_poly.size();
-      obs_y/= curr_poly.size();
-      obs_center.emplace_back(obs_x,obs_y);
-
-    }
-    //Printing centers
-    // for (int i = 0; i < obs_center.size(); i++)
-    // std::cout << obs_center[i] << ' ';
-    //finding radius
-    for(int i=0; i<obstacle_list.size(); i++){
-      double max_dist=0.0;
-      Polygon curr_poly= obstacle_list[i];
-
-      for(int pt=0; pt< curr_poly.size(); pt++){
-        double dist=sqrt(pow((curr_poly[pt].x - curr_poly[(pt+1) % curr_poly.size()].x),2) + pow((curr_poly[pt].y - curr_poly[(pt+1) % curr_poly.size()].y),2));
-        if(dist > max_dist){
-          max_dist=dist;
-        }
-      }
-
-    
-      obs_radius.emplace_back(max_dist/2.0);
-    }
-
-
-    //-----------gate-------------------------------
-
-    //center
-    //As gate is a rectangle with 4 sides
-    double gate_x=(gate[0].x+gate[1].x+gate[2].x+gate[3].x)/4;
-    double gate_y=(gate[0].y+gate[1].y+gate[2].y+gate[3].y)/4;
-
-    //orientation
+    int kmax = 10;      // Max angle of curvature
+    int npts = 50;  // Standard discretization unit of arcs
+    //---------------------------------------------------------Knowing the Arena-----------------------------------------------
+    // --------------------------------------GATE ORIENTATION-------------------------------------
+    double gate_x = (gate[0].x + gate[1].x + gate[2].x + gate[3].x)/4;
+    double gate_y = (gate[0].y + gate[1].y + gate[2].y + gate[3].y)/4;
+ 
+    // Compute gate orientation
     double gate_th;
     //left corners (when distance of gate center from left border is less than the right border)
-
-    if(fabs(gate_x - borders[0].x) < fabs(gate_x - borders[1].x)){
-      //bottom
-      if(fabs(gate_y - borders[0].y)<fabs(gate_y - borders[3].y)){
-        //horizontal
-        if(fabs(gate_y - borders[0].y)< fabs(gate_x - borders[0].x)){
-          gate_th= -M_PI/2;
-          std::cout << "Gate- Left-bottom-horizontal" << std::endl;
+    // Left 
+    if (fabs(gate_x - borders[0].x) < fabs(gate_x - borders[1].x)){
+      // Bottom-left
+      if (fabs(gate_y - borders[0].y) < fabs(gate_y - borders[3].y)){
+        // Horizontal
+        if (fabs(gate_y - borders[0].y) < fabs(gate_x - borders[0].x)){
+          gate_th = -M_PI/2;
+        // Vertical
+        } else {
+          gate_th = M_PI;
         }
-        else{//vertical
-          gate_th= M_PI;
-          std::cout << "Gate- Left-bottom-vertical" << std::endl;
-        }
-
-      }
-      //top
-      else{
-        //horizontal
-        if(fabs(gate_y - borders[3].y)<fabs(gate_x - borders[0].x)){
-          gate_th= M_PI/2;
-          std::cout << "Gate- Left-top-horizontal" << std::endl;
-
-        }
-        else{ //vertical
-          gate_th= M_PI;
-          std::cout << "Gate- Left-top-vertical" << std::endl;
+      // Top-left
+      } else {
+        // Horizontal
+        if (fabs(gate_y - borders[3].y) < fabs(gate_x - borders[0].x)){
+          gate_th = M_PI/2;
+        // Vertical
+        } else {
+          gate_th = M_PI;
         }
       }
-
-      }
-
-    // right corners (when distance of gate center from right border is less than the left border)
-    else{
-      //bottom
-      if(fabs(gate_y - borders[0].y)<fabs(gate_y - borders[3].y)){
-        //horizontal
-        if(fabs(gate_y - borders[0].y)<fabs(gate_x - borders[1].x)){
-          gate_th= -M_PI/2;
-          std::cout << "Gate- right-bottom-horizontal" << std::endl;
-
+      // right corners (when distance of gate center from right border is less than the left border)
+  // Right
+    } else {
+      // Bottom-right
+      if (fabs(gate_y - borders[0].y) < fabs(gate_y - borders[3].y)){
+        // Horizontal
+        if (fabs(gate_y - borders[0].y) < fabs(gate_x - borders[1].x)){
+          gate_th = -M_PI/2;
+        // Vertical
+        } else {
+          gate_th = 0;
         }
-        else{//vertical
-          gate_th=0;
-          std::cout << "Gate- right-bottom-vertical" << std::endl;
-
+      // Top-right
+      } else {
+        // Horizontal
+        if (fabs(gate_y - borders[3].y) < fabs(gate_x - borders[1].x)){
+          gate_th = M_PI/2;
+        // Vertical
+        } else {
+          gate_th = 0;
         }
-
-      }
-      else{ //top
-        //horizontal
-        if(fabs(gate_y - borders[3].y) < fabs(gate_x - borders[1].x)){
-          gate_th= M_PI/2;
-          std::cout << "Gate- right-top-horizontal" << std::endl;
-        }
-        else{
-          gate_th=0;
-          std::cout << "Gate- right-top-vertical" << std::endl;
-        }
-
-      }
-
-    
+      }    
     }
-    
-    std::vector<double> gate_orientn= {gate_x, gate_y, gate_th};
 
+    std::vector<double> gate_orientn = {gate_x, gate_y, gate_th};
 
-    //-----------victims-------------------------------
-
+    //---------------------------------------------------------------- VICTIM CENTER-------------------------------------------------
     std::vector<Point> victim_center;
     double victim_x;
     double victim_y;
-
-    for(int i=0; i<victim_list.size(); i++){
-      victim_x=0;
-      victim_y=0;
-
-      Polygon curr_poly=std::get<1>(victim_list[i]);
-      for(int pt=0; pt<curr_poly.size(); pt++){
-        victim_x+= curr_poly[pt].x;
-        victim_y+=curr_poly[pt].y;
-      }
-
-      //Avg of coordinates
-      victim_x/=curr_poly.size();
-      victim_y/=curr_poly.size();
-      std::cout<<"victim center  "<<i <<victim_x <<victim_y <<std::endl;
-      victim_center.emplace_back(victim_x, victim_y);
+ 
+    for (int i = 0; i < victim_list.size(); i++){
+        victim_x = 0;
+        victim_y = 0;
+        Polygon curr_poly = std::get<1>(victim_list[i]);
+        for (int pt = 0; pt < curr_poly.size(); pt++){
+            victim_x += curr_poly[pt].x;
+            victim_y += curr_poly[pt].y;
+        }
+        victim_x /= curr_poly.size();
+        victim_y /= curr_poly.size();
+        
+        victim_center.emplace_back(victim_x, victim_y);
     }
+ 
+    //-------------------------------------------------------------OBSTACLE CENTER---------------------------------------------------
+    std::vector<double> obs_radius;
+    std::vector<Point> obs_center;
+   
+    double obs_x;
+    double obs_y;
+ 
+    //Center
+    for (int i = 0; i < obstacle_list.size(); i++){
+        obs_x = 0;
+        obs_y = 0;
+        Polygon curr_poly = obstacle_list[i];
+        for (int pt = 0; pt < curr_poly.size(); pt++){
+            obs_x += curr_poly[pt].x;
+            obs_y += curr_poly[pt].y;
+        }
+        obs_x /= curr_poly.size();
+        obs_y /= curr_poly.size();
+        obs_center.emplace_back(obs_x, obs_y);
+    }
+    //Radius
+    for (int i = 0; i < obstacle_list.size(); i++){
+        double max_dist = 0.0;
+        Polygon curr_poly = obstacle_list[i];
+        for (int pt = 0; pt < curr_poly.size(); pt++){
+            double dist = sqrt(pow((curr_poly[pt].x-curr_poly[(pt+1) % curr_poly.size()].x),2)+pow((curr_poly[pt].y-curr_poly[(pt+1) % curr_poly.size()].y),2));
+            if(dist > max_dist){
+                max_dist = dist;
+            }  
+        }
+        obs_radius.emplace_back(max_dist / 2.0);
+    }
+ 
+   //------------------------------------------------MISSION 1---------------------------------------------------- 
 
-      //-----end arena information-------------------------------------------
+  std::vector<Point> major_points_path; // (path with all the goal points)
 
-        //Path newPath;
-        // float s=0.0;
-        // float x=0.0;
-        // float y=0.0;
-        // float theta=0.0;
-        // float kappa=0.0;
+  if (mission_1){
 
-        //path.points.emplace_back(0.0,0,.0,0.0,0.0,0.0);
-
-    //----------------- Path planning---------------------------
-    //mission 1
-    std::vector<Point> major_points_path; //all victim centers as major points
-    //Add initial point
+    //Add victims as major points
     major_points_path.push_back(Point(x,y));
-
-    for(int i =0; i< victim_center.size(); i++){
-      major_points_path.push_back(victim_center[i]);
-
+    for (int i = 0; i < victim_center.size(); i++){
+        major_points_path.push_back(victim_center[i]);
     }
-    //Last point as gate center
     major_points_path.push_back(Point(gate_x, gate_y));
 
-    double path_length=0;
+    double path_length = 0;
 
-    rrt_star(theta, path, major_points_path, borders, kmax, npts, obstacle_list, obs_radius, obs_center, path_length, gate_orientn);
+    RRT(theta, path, major_points_path, borders, kmax, npts, obstacle_list, obs_radius, obs_center, path_length, gate_orientn);
 
-    std::cout<< "\n\n--------- Planning end----------\n\n\n";
+
+  } else {
+  
+    std::cout << "\n\n----------- invalid mission-------- \n\n\n";
+
+    } 
+    
+    std::cout << "\n\n------ planning end------- \n\n\n";
 
   } 
   //----------------planning end----------------
 
-  void rrt_star(const float theta, Path& path, std::vector<Point>& major_points_path, const Polygon& borders, int kmax, int npts, const std::vector<Polygon>& obstacle_list, std::vector<double> obs_radius, std::vector<Point> obs_center, double& path_length, const std::vector<double> gate_orientn){
+  void RRT(const float theta, Path& path, std::vector<Point>& major_points_path, const Polygon& borders, int kmax, int npts, const std::vector<Polygon>& obstacle_list, std::vector<double> obs_radius, std::vector<Point> obs_center, double& path_length, const std::vector<double> gate_orientn){
 
-    //-----------------------------Initialize variables------------------------
-    //List of all the current paths and nodes
-    std::vector<Path> path_list;
-    std::vector<path_pose> nodes;
-    std::vector<Pose> temp_path; //temperory path
+    //List of all current nodes
+  std::vector<path_pos> nodes_list;
+  //List of all current paths
+  std::vector<Path> paths_list;
 
-    double s;
+  double s;
+  //generate random like number (for sampling)
+  srand(time(NULL)); 
+  int MAX_X = (borders[1].x*100);
+  int MIN_X = (borders[0].x*100);
+  int MAX_Y = (borders[3].y*100);
+  int MIN_Y = (borders[0].y*100);
+  int sample_x = 0;
+  int sample_y = 0;
+  double q_rand_x = 0;
+  double q_rand_y = 0;
+  int rand_count = 1;
 
-    srand(time(NULL));//object to represent the current time.
+  path_pos first_node = {}; //First node in the tree
+
+  std::vector<Pose> temp_path; //Temporary path from point to point
+
+  int goal = 1; //The first goal is the first number
+  bool failed = false;
+  bool trying = false;
+  
+  int wrong_initial_angles = 0;
+
+  while(goal < major_points_path.size()){
+  
+    double best_goal_cost = 100000; 
+    path_pos best_goal_pos = {};  
+
+    std::cout << "Current goal: " << goal << std::endl;
+    nodes_list.clear();
+    nodes_list.shrink_to_fit(); //For memory purposes
+    paths_list.clear();
+    paths_list.shrink_to_fit(); //For memory purposes
+
+    //-------------------------------------Robot Initialize with robot position (x,y,theta)------------------------------
+    if(goal == 1){
+        first_node.x = major_points_path[0].x;
+        first_node.y = major_points_path[0].y;
+        first_node.theta = theta; 
+    }
+    //If not goal = 1, take the last position in Path
+    else{
+        Pose p = path.points.back();
+        first_node.x = p.x;
+        first_node.y = p.y;
+        first_node.theta = p.theta;
+    }
+    //----------------------------------------------------
+
+    // -----------------------------------------------RRT* 1 - List of nodes and paths----------------------
+    Path p;
+    nodes_list.push_back(first_node);
+    paths_list.push_back(p); //Adding empty path for indexing purposes
+
+    //-----------------------------------------------RRT 2 - Reach each major point (major point path)-----------------
+    bool goalReached = false;
+    int loop_cnt = 1;
     
-    int x_max=(borders[1].x*100);
-    int y_max=(borders[3].y*100);
-    int x_min=(borders[0].x*100);
-    int y_min=(borders[0].y*100);
+    bool atLeastOneFound = false;
 
-    // int x_max=(borders[1].x);
-    // int y_max=(borders[3].y);
-    // int x_min=(borders[0].x);
-    // int y_min=(borders[0].y);
-
-    int sample_x=0;
-    int sample_y=0;
-
-    double q_rand_x=0;
-    double q_rand_y=0;
-
-    int rand_cnt=1;
-
-    path_pose start_node={};
-
-    int goal_number=1;
-    bool failed= false;
-    bool trying=false;
-
-    int initial_angle_mistake=0;
-
-    int index=0;
-    double temp_cost=100000;
-    double best_x=0;
-    double best_y=0;
-    double best_theta=0;
-    Path best_path={};
-    //---------end initializations------------
-
-    //rrt_star algorithm, runs until all the major points(victims) are covered
-
-    std::cout<<"rrt 1, major_points_path.size():  "<<major_points_path.size()<<std::endl;
-    while(goal_number < major_points_path.size()){
-
-      double best_cost= 100000;
-      path_pose best_pos= {};
-
-      std::cout<<"rrt 2, current goal number: "<<goal_number<<std::endl;
-      nodes.clear();
-      nodes.shrink_to_fit();//for memory
-      path_list.clear();
-      path_list.shrink_to_fit();
-      //-----------------------FIRST GOAL CHECK---------------------------
-      if(goal_number==1){
-        start_node.x=major_points_path[0].x;
-        start_node.y=major_points_path[0].y;
-        start_node.theta=theta;
-        std::cout<<" rrt 3, Initialized robot position ";
+    while(goalReached == false){
+       
+        //-------------------------------------CONDITION :Reset if not found for too long----------------------------------
+        if(nodes_list.size() > max_nodes or loop_cnt == max_loops){
+        
+          if (loop_cnt == max_loops){
+            loop_cnt = 1;
+            
+              throw std::runtime_error("Resetting: NOT CONVERGING");
+            // }
+            
+          } else {
+            std::cout << "Resetting: TOO MANY NODES" << std::endl;
+          }
+        
+        // Clear lists and keep only 1st element
+            path_pos l = nodes_list.at(0);
+            Path lp = paths_list.at(0);
+            nodes_list.clear();
+            nodes_list.shrink_to_fit();                                
+            paths_list.clear();
+            paths_list.shrink_to_fit();
+            nodes_list.push_back(l);
+            paths_list.push_back(lp);         
+        }
+        //---------------------------------------------Resetting end----------------------------
+        // Count loops
+        if (loop_cnt % 100 == 0){
+        std::cout << "Loop: " << loop_cnt << std::endl;
       }
+      loop_cnt++;
+      
+      
+    // --------------------------------------------------------RRT* -------------------------------------------
+    
+   
+    if (RRT_STAR) {  
+    
+    
+  
+        int index = 0;
+        double tmp_cost = 100000;
+        double best_x = 0;
+        double best_y = 0;
+        double best_theta = 0;
+        Path best_path = {};
 
-      //if not the first goal then take the last element in the path
-      else{
-        std::cout<<" rrt 3, Else of Initialized robot ";
-        Pose p=path.points.back();
-        start_node.x=p.x;
-        start_node.y=p.y;
-        start_node.theta=p.theta;
-      }
-      //List of nodes and path
-      Path path0;
-      nodes.push_back(start_node);
-      path_list.push_back(path0);
+        //--------------------------------------------------RRT 3 & 4 - Compute next random point------------
+        
 
-      bool goal_reached=false; //flag for Reaching each major point
-      int loop_cnt=1;
-      bool at_least_one_found=false;
+          sample_x = rand()%(MAX_X-MIN_X+1)+MIN_X;
+          sample_y = rand()%(MAX_Y-MIN_Y+1)+MIN_Y;
 
-
-      //-------------------------- GOAL NOT REACHED------------------------
-      while (goal_reached==false){
-        //std::cout<< "rrt 4, goal reached false"<< std::endl;
-        //-----------------------condition 1 where ROBOT GETS STUCK-----------------
-        //reset if taking too long
-        if(nodes.size()>max_nodes or loop_cnt==max_loops){
-          if(loop_cnt==max_loops){
-            loop_cnt==1;
-            throw std::runtime_error("resetting");
-
-            }
-
-          else{
-            std::cout<< "resetting: Number of nodes exceeded"<< std::endl;
+          q_rand_x = sample_x/100.00;
+          q_rand_y = sample_y/100.00;
+          rand_count += 1;
+          if (rand_count % 5 == 0){ // Pick goal every 5 iterations
+          
+              q_rand_x =  major_points_path[goal].x;
+              q_rand_y =  major_points_path[goal].y;
+              trying = true;
           }
 
-          //keep only first element and clear the list
-          path_pose back_to_pose1=nodes.at(0);
-          Path back_to_path1= path_list.at(0);
-          nodes.clear();
-          nodes.shrink_to_fit();
-          path_list.clear();
-          path_list.shrink_to_fit();
-          nodes.push_back(back_to_pose1);
-          path_list.push_back(back_to_path1);
-        }
+          //--------------------------------------------RRT  5 - Find parent node (lowest cost)----------------
+        // Make sure able to reach parent
+        
+        for(int i=0; i<nodes_list.size(); i++){
+        
+              double dist_points = sqrt(pow((q_rand_x-nodes_list.at(i).x),2)+pow((q_rand_y-nodes_list.at(i).y),2));
+              
+              if(dist_points > 0.1){
+              
+             double ANGLE = 0.0;
 
-        //count loops
-        if(loop_cnt % 100==0){
-          //std::cout << "loop_cnt: "<<loop_cnt<< std::endl;
-        }
-        loop_cnt++;
-        //--------------initial part end--------------------------------------
-
-        //-----next random point----------
-        sample_x=rand()%(x_max - x_min +1)+x_min;
-        sample_y=rand()%(y_max - y_min +1)+y_min;
-
-        q_rand_x=sample_x/100.0;
-        q_rand_y=sample_y/100.0;
-
-        // q_rand_x=sample_x;
-        // q_rand_y=sample_y;
-        rand_cnt += 1;
-
-        if(rand_cnt % 5 == 0){ //pick goal every 5 iterations
-
-          q_rand_x = major_points_path[goal_number].x;
-          q_rand_y = major_points_path[goal_number].y;
-          trying=true;
-        }
-        //------PARENT NODE SEARCH------------------------------------
-
-        for(int i=0; i<nodes.size(); i++){
-          //std::cout<< "rrt 5, for loop nodes"<< std::endl;
-          double pt_distances= sqrt(pow((q_rand_x- nodes.at(i).x),2) + pow((q_rand_y- nodes.at(i).y),2) );
-          if(pt_distances>0.1){
-            double angle= 0.0;
-
-            //----------if random pt NEXT GOAL (NOT LAST)---------------------
-            if(q_rand_x == major_points_path[goal_number].x and q_rand_y == major_points_path[goal_number].y and major_points_path.size() != goal_number+1){
-              angle=calculate_angle(Point(nodes.at(index).x, nodes.at(index).y), major_points_path[goal_number+1]);
+            // If going to next (not last) goal
+            if (q_rand_x == major_points_path[goal].x and q_rand_y == major_points_path[goal].y and major_points_path.size() != goal+1){
+              ANGLE = calculate_angle(Point(nodes_list.at(index).x,nodes_list.at(index).y), major_points_path[goal+1]);
+            // If point is gate, arrive orthogonally
+            } else if(q_rand_x == gate_orientn[0] and q_rand_y == gate_orientn[1]){
+              ANGLE = gate_orientn[2];
+            // If point before next goal or next goal is last
+            } else {
+              ANGLE = calculate_angle(Point(nodes_list.at(index).x,nodes_list.at(index).y), major_points_path[goal]);
             }
-            //---------- if random point GATE-----------------
-            else if(q_rand_x == gate_orientn[0] and q_rand_y== gate_orientn[1]){
-              angle=gate_orientn[2];
-            }
-            //-----------LAST GOAL--------------------------
-            else{
-              angle= calculate_angle(Point(nodes.at(index).x, nodes.at(index).y), major_points_path[goal_number]);
-            }
-
-            //different arrival angles
-
-            for (int ang=0; ang<3; ang++){
-              angle +=(ang-1)*0.349;
-
+          
+            // Loop to use different arrival angles 
+            for (int ang = 0; ang < 3; ang++){
+              
+              ANGLE += (ang-1)*0.349;   // +/- 20°
+              
+          
               Path new_path;
+              dubinsCurve dubins = {};
 
-              dubinsCurve dubins={};
+              // Finding a path from one initial point to goal
+              dubins_shortest_path(dubins, nodes_list.at(i).x, nodes_list.at(i).y, nodes_list.at(i).theta, q_rand_x, q_rand_y, ANGLE, kmax);
 
-              //-----------INITIAL POINT TO GOAL PATH-----------------
+              // Dicretize the 3 arcs
+              discretize_arc(dubins.arc_1, s, npts, new_path); // Arc 1
+              discretize_arc(dubins.arc_2, s, npts, new_path); // Arc 2
+              discretize_arc(dubins.arc_3, s, npts, new_path); // Arc 3
 
-              dubins_shortest_path(dubins, nodes.at(i).x, nodes.at(i).y, nodes.at(i).theta, q_rand_x, q_rand_y, angle, kmax);
-              discretize_arc(dubins.arc_1, s, npts, new_path);
-              discretize_arc(dubins.arc_2, s, npts, new_path);
-              discretize_arc(dubins.arc_3, s, npts, new_path);
-
-              bool collision=false;
+              bool collision = false;
 
               //------------ARENA BORDERS--------------------------
               for(int j=0; j<new_path.points.size(); j++){
-                std::cout<< "rrt 6, collide with borders"<< std::endl;
-                if(new_path.points.at(j).x < (borders[0].x+0.02) or new_path.points.at(j).x> (borders[1].x - 0.02) or new_path.points.at(j).y < (borders[0].y + 0.02) or new_path.points.at(j).y>(borders[3].y - 0.02) ){
-                  collision= true;
-                  if(trying){failed = true; trying= false;}
-                  break;
+                if(new_path.points.at(j).x < (borders[0].x + 0.02) or new_path.points.at(j).x > (borders[1].x - 0.02) or new_path.points.at(j).y < (borders[0].y + 0.02)  or new_path.points.at(j).y > (borders[3].y - 0.02)){
+                  collision = true;
+                  if(trying){failed = true; trying = false;}        
+                  break; 
                 }
 
                 //----------OBSTACLE COLLISION--------------------
                 for(int k=0; k<obstacle_list.size(); k++){
-                  double obs_dist = sqrt(pow((new_path.points.at(j).x - obs_center.at(k).x),2) + pow((new_path.points.at(j).y - obs_center.at(k).y),2));
-                  double result= inside_polygon(obstacle_list.at(k), Point(new_path.points.at(j).x, new_path.points.at(j).y));
-                  if(result !=1 or obs_dist < (obs_radius.at(k)+0.05)){
-                    std::cout<< "rrt 7, obs collision"<< std::endl;
-                    collision=true;
-                    if(trying){failed=true; trying= false;}
-                    break;
+                  double obs_dist = sqrt(pow((new_path.points.at(j).x-obs_center.at(k).x),2)+pow((new_path.points.at(j).y-obs_center.at(k).y),2));
+                  double result = inside_polygon(obstacle_list.at(k), Point(new_path.points.at(j).x,new_path.points.at(j).y)); 
+                   
+                  if(result != 1 or obs_dist < (obs_radius.at(k)+0.05)){
+                    collision = true;
+                    if(trying){failed = true;trying = false;}
+                    break; 
                   }
                 }
+              } //-------COLLISION CHECK END-----------------------------
+                
+                // Update if not collision and better cost
+                if (!collision and dubins.L + nodes_list.at(i).cost < tmp_cost){
+                
+                  index = i;        
+                  tmp_cost = dubins.L + nodes_list.at(i).cost;
+                  best_x = new_path.points.back().x;
+                  best_y = new_path.points.back().y;
+                  best_theta = new_path.points.back().theta;
+                  best_path = new_path;
               }
-              //-------COLLISION CHECK END-----------------------------
-              if(!collision and dubins.L + nodes.at(i).cost < temp_cost){
-
-              //if(dubins.L + nodes.at(i).cost < temp_cost){
-
-              index=i;
-              temp_cost=dubins.L + nodes.at(i).cost;
-              best_x=new_path.points.back().x;
-              best_y=new_path.points.back().y;
-              best_theta=new_path.points.back().theta;
-              best_path= new_path;
-            }
-
-            }// angle var
-
-
-            //---------UPDATE if no collision and better cost---------
+              
+          } // End angle variations
+                
+        } // End if condition (distance)
             
+      } // End loop parent search
 
-          }//end if distance
-        }// loop parent node search
-        //----------IF PARENT FOUND------------------------------------
 
-        if(temp_cost < 100000){
-          failed=false;
-          //std::cout << "new node"<<std::endl;
+        //-----------------------------------------IF PARENT FOUND-----------------------------------------------
+        if (tmp_cost < 100000){ 
+        
+          failed = false;
+          
+          std::cout << "New node created" << std::endl;
+  
+        path_pos new_node = {};
+        new_node.x = best_x;
+        new_node.y = best_y;
+      
+        new_node.theta = best_theta;
+        new_node.path_ind = nodes_list.size();
 
-          path_pose new_node={};
-          new_node.x=best_x;
-          new_node.y=best_y;
-          new_node.theta= best_theta;
-          new_node.path_ind=nodes.size();
+        //------------------------------------------RRT 8----------------------------
+        new_node.parent_ind = index;
+        new_node.cost = tmp_cost;
+      
+        nodes_list.push_back(new_node);
+        paths_list.push_back(best_path);
 
-          //line 8
-
-          new_node.parent_ind=index;
-          new_node.cost= temp_cost;
-
-          nodes.push_back(new_node);
-          path_list.push_back(best_path);
-
-          //line 9
-          //---------------CHECK GOAL REACHED-------------------
-
-          if(sqrt(pow((new_node.x - major_points_path.at(goal_number).x),2) + pow((new_node.y - major_points_path.at(goal_number).y),2)) < 0.1){
-            at_least_one_found=true;
-            std::cout<< "goal number: "<<goal_number<<"reached"<< new_node.x << new_node.y <<std::endl;
-
-            if(temp_cost<best_cost){
-              best_cost=temp_cost;
-              best_pos=nodes.back();
-            }
-          } 
-
-        }
-        //std::cout<< "node size"<< nodes.size() <<std::endl;
-        //std::cout<< "loop_cnt"<< loop_cnt<< std::endl;
-        //std::cout<< "atleast one found"<<std::endl;
-
-       if(at_least_one_found and (nodes.size()> min_nodes or loop_cnt == 1000)){
-        std::cout<< "nodes"<<std::endl;
-        //if(at_least_one_found){
-          std::cout<< "atleast one found"<<std::endl;
-
-          path_pose pos= best_pos;
-          goal_reached=true;
-          goal_number+=1;
-          std::cout<< "goal_number increment"<< goal_number <<std::endl;
-          std::cout<< "pos.path_ind"<< pos.path_ind <<std::endl;
-          //std::cout<< "pos.parent_ind"<< pos.path_ind <<std::endl;
-
-          while(pos.path_ind !=0){
-            std::cout<<"in while";
-            std::cout<< "pos.path_ind decrement in while" << pos.path_ind <<std::endl;            
-
-            temp_path.insert(temp_path.begin(), path_list.at(pos.path_ind).points.begin(), path_list.at(pos.path_ind).points.end());
-
-            pos=nodes.at(pos.parent_ind);
+        //-----------------------------------------------RRT 9 - Check if goal reached------------------
+          if(sqrt(pow((new_node.x - major_points_path.at(goal).x),2)+pow((new_node.y - major_points_path.at(goal).y),2)) < 0.1){ 
+              
+              //goalReached = true;
+              atLeastOneFound = true; 
+              std::cout << "Goal number" << goal << " reached" << std::endl;
+              
+              if(tmp_cost < best_goal_cost){
+                best_goal_cost = tmp_cost;
+                best_goal_pos = nodes_list.back();
+              }
+              
           }
-        }
-
-        //end RRT_STAR
-      }//Goal Reached
-      //-------------ADD PTS TO FINAL PATH--------------------------------------------
-
-      path.points.insert(path.points.end(), temp_path.begin(), temp_path.end());
-      temp_path.clear();
-      temp_path.shrink_to_fit();
-
-      for(int i=0; i<path.points.size()-1;i++){
-        //std::cout<< "\n path.points for loop \n\n";
-
-        path_length += sqrt(pow(path.points[i].x - path.points[i+1].x,2)+pow(path.points[i].y- path.points[i+1].y,2));
-
       }
 
-      std::cout<< goal_number <<" : Path saved";
+        //if(goalReached){
+        if(atLeastOneFound and (nodes_list.size() > least_nodes or loop_cnt == 1000)){   
+        
 
+            path_pos pos = best_goal_pos;
+            goalReached = true;
+            goal += 1;
+     
+            while(pos.path_ind != 0){
+                
+                temp_path.insert(temp_path.begin(),paths_list.at(pos.path_ind).points.begin(),paths_list.at(pos.path_ind).points.end());
+               
+              // Go backwards to parent  
+              pos = nodes_list.at(pos.parent_ind);
 
+            }
+        }
+        
+        
+      } // RRT_STAR  
+        
+    } // Goal reached
 
+    //-------------------------------------------------------- Add points to final path---------------------------------
+    path.points.insert(path.points.end(), temp_path.begin(), temp_path.end());
+    temp_path.clear();
+    temp_path.shrink_to_fit();
 
-    }
-    std::cout<< "\n -------RRT* END------- \n\n";
-
-
-
-  }
-
-  double calculate_angle(Point a ,Point b){
-    double angle= atan2(fabs(a.y - b.y), fabs(a.x - b.x));
-
-    if(b.x> a.x and b.y < a.y){
-      angle=-angle;
-
-    }
-    else if(b.x < a.x and b.y>a.y){
-      angle=M_PI-angle;
-
-    }
-    else if(b.x < a.x and b.y<a.y){
-      angle=M_PI+angle;
+    for (int i = 0; i < path.points.size()-1; i++){
+      path_length += sqrt(pow(path.points[i].x-path.points[i+1].x,2) + pow(path.points[i].y-path.points[i+1].y,2));
       
     }
-    return angle;
+
+  }
+  
+  std::cout << "\n----------- RRT* OVER with path length: "<< path_length <<' ' <<" ---------- \n\n";
+
+
   }
 
-  int inside_polygon(Polygon obs, Point pt){
-    int cnt=0;
-    double xint;
-    int N= obs.size();
-    Point p1,p2;
+  double calculate_angle(Point a, Point b){
+  
+    double angle = atan2(fabs(a.y - b.y), fabs(a.x - b.x));
+    
+    if (b.x > a.x and b.y < a.y){
+      angle = -angle;
+    } else if (b.x < a.x and b.y > a.y){
+      angle = M_PI-angle;
+    } else if (b.x < a.x and b.y < a.y){
+      angle = M_PI+angle;
+    }
+  
+  return angle;
+        
+}
 
-    p1 = obs.at(0);
-    // Iterating through obstacles
+  int inside_polygon(Polygon obstacle, Point pt){
+    int counter = 0;
+    double xinters;
+    int N = obstacle.size();
+    Point p1, p2;
+ 
+    p1 = obstacle.at(0);
+    // Iterate through obstacles
     for(int i = 1; i <= N; i++){
-        p2 = obs.at(i % N);
+        p2 = obstacle.at(i % N);
         if(pt.y > std::min(p1.y, p2.y)){
             if(pt.y <= std::max(p1.y, p2.y)){
                 if(pt.x <= std::max(p1.x, p2.x)){
                     if(p1.y != p2.y){
-                        xint = (pt.y - p1.y) *(p2.x - p1.x) / (p2.y - p1.y) + p1.x;
-                        if(p1.x == p2.x or pt.x <= xint){
-                        cnt++;                     
+                        xinters = (pt.y - p1.y) *(p2.x - p1.x) / (p2.y - p1.y) + p1.x;
+                        if(p1.x == p2.x or pt.x <= xinters){
+                        counter++;                     
                         }
                     }
                 }          
@@ -1235,12 +1172,11 @@ void unwarp(const cv::Mat& img_in, cv::Mat& img_out, const cv::Mat& transf,
         p1 = p2;
     }
  
-    if(cnt % 2 == 0){
+    if(counter % 2 == 0){
         return 1;  
     }else{
         return 0;  
     }
-
   }
 
 }//CODE END
