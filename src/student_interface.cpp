@@ -369,9 +369,11 @@ bool processObstacles(const cv::Mat& hsv_img, const double scale, std::vector<Po
     return out_ROI;
   }
 
-///std::string template_folder = "/home/ubuntu/workspace/template/";
+  std::string template_folder = "/home/ubuntu/workspace/project/src/template/";
+  //std::string template_folder = ".../workspace/project/src/template/";
 
-  std::string template_folder = "/home/ubuntu/workspace/project/src/template";
+  //std::string template_folder = "/home/workspace/group_4/src/template";
+
   
 bool processVictims(const cv::Mat& hsv_img, const double scale, std::vector<std::pair<int,Polygon>>& victim_list){
 
